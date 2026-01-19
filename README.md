@@ -25,7 +25,7 @@ The project utilizes a parameter-efficient fine-tuning (PEFT) approach to adapt 
 - **Compute Precision**: `bfloat16` for computations.
 
 ### Training Configuration
-- **Dataset**: 125 clinical sequences (90 training, 10 validation, 25 test).
+- **Dataset**: Clinical sequences (80% training, 10% validation, 10% test).
 - **Epochs**: 2
 - **Learning Rate**: 2e-4
 - **Batch Size**: 1 (Effective batch size ~2 with gradient accumulation).
