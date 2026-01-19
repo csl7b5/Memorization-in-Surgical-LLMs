@@ -7,7 +7,7 @@ Revealing key privacy risks in surgical LLMs through various attacks. Based on p
 
 ## Project Overview
 
-The objective is to quantify memorization within a clinical context. We fine-tuned a state-of-the-art open-source LLM on a pilot dataset of 125 CTS operative notes and subsequently performed three types of attacks to test for sensitive data leakage.
+The objective is to quantify memorization within a clinical context. We fine-tuned a state-of-the-art open-source LLM on a pilot dataset of operative notes and subsequently performed three types of attacks to test for sensitive data leakage. The point of this repository is to open a conversation for collaborative efforts in finding key risks in surgical LLMs by open-sourcing both the idea and the code.
 
 ## Model Architecture & Training
 
