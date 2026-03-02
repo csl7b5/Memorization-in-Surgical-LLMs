@@ -475,6 +475,37 @@ def build_card(row, mode: str = "full") -> str:
         else:
             lines.append(f"- Bicuspid aortic valve: {'Yes' if bav else 'No/Unknown'}")
 
+    # Billing and Diagnoses (ICD-10)
+    icd_raw = row.get("Icd10 Codes")
+    icd_codes = []
+    if not pd.isna(icd_raw):
+        # Extract individual codes
+        raw_list = str(icd_raw).split(",")
+        for c in raw_list:
+            c = c.strip()
+            if c:
+                icd_codes.append(c)
+
+    if mode != "partial":
+        lines.append("")
+        lines.append("Billing/Diagnoses:")
+        if icd_codes:
+            if mode == "coarsened":
+                # Coarsening strategy: truncate to base 3-character category (e.g., I71.01 -> I71)
+                coarsened_codes = []
+                for code in icd_codes:
+                    if "." in code:
+                        coarsened_codes.append(code.split(".")[0])
+                    else:
+                        coarsened_codes.append(code[:3])
+                # Deduplicate after coarsening to avoid e.g. "I71, I71"
+                coarsened_codes = list(dict.fromkeys(coarsened_codes))
+                lines.append(f"- ICD-10 Codes: {', '.join(coarsened_codes)}")
+            else:
+                lines.append(f"- ICD-10 Codes: {', '.join(icd_codes)}")
+        else:
+            lines.append("- ICD-10 Codes: None recorded")
+
     # Outcome
     lines.append("")
     lines.append("Outcome:")
@@ -528,6 +559,7 @@ def main():
                 "vus_gene": None if pd.isna(row.get("VUS Gene")) else str(row.get("VUS Gene")).strip(),
                 "underwent_reoperation": int(_safe_bool01(row.get("underwent_reoperation"))),
                 "mortality": int(_safe_bool01(row.get("mortality"))),
+                "icd10_codes": str(row.get("Icd10 Codes")).strip() if not pd.isna(row.get("Icd10 Codes")) else None,
             }
 
             rec = {"meta": meta, "text": card}

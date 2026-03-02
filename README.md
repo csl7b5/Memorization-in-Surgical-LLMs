@@ -1,156 +1,253 @@
-# Mitigating Privacy Attacks on LLMs Trained on Surgical Data using Supervised Fine-Tuning
+# Memorization of Protected Health Information in Surgical LLMs Despite Parameter-Efficient Fine-Tuning
 
 ![Python](https://img.shields.io/badge/python-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54)
 ![Data Privacy](https://img.shields.io/badge/Data_Privacy-Strict-red?style=for-the-badge&logo=security&logoColor=white)
-![LLM Fine-Tuning](https://img.shields.io/badge/LLM-Fine--Tuning-blue?style=for-the-badge&logo=openai&logoColor=white)
+![LLM Fine-Tuning](https://img.shields.io/badge/LLM-LoRA_SFT-blue?style=for-the-badge&logo=openai&logoColor=white)
 
 ## Project Overview
-This project investigates whether Large Language Models (LLMs) memorize the records of individual patients when fine-tuned on clinical datasets, and evaluates the effectiveness of data coarsening as a privacy mitigation strategy. 
 
-We utilize a proprietary dataset of aortic genetics patients to generate unstructured clinical summaries (Patient Cards). We then measure how heavily the LLM memorizes unique individuals by subjecting the models to **Membership Inference Attacks (MIA)** and **Collapse/Prompt Extraction** experiments.
+This project empirically evaluates whether Large Language Models (LLMs) fine-tuned on proprietary surgical patient data via parameter-efficient LoRA adaptation memorize protected health information (PHI) — and whether data coarsening can mitigate this risk.
+
+We utilize a proprietary dataset of **1,048 aortic surgery patients** to generate structured clinical summaries (Patient Cards). Three targeted PHI extraction attacks are evaluated across three model configurations.
 
 > [!CAUTION]
 > **DATA PRIVACY NOTICE:** The raw data backing this project is proprietary, restricted clinical data. This repository contains only the data engineering scripts and methodology framework. Raw patient records must not be shared or leaked. A strict `.gitignore` is included to prevent accidental commits of the `data/` directory.
 
+---
+
+## Model Configurations
+
+| Model | Description |
+|---|---|
+| **M0 (Baseline)** | Unmodified `meta-llama/Llama-3.1-8B-Instruct` — no fine-tuning |
+| **M1 (Exact SFT)** | LoRA fine-tuned on fully-identifiable patient cards for 12 epochs |
+| **M2 (Coarsened SFT)** | LoRA fine-tuned on privacy-mitigated, coarsened patient cards for 12 epochs |
+
+Fine-tuning was performed via the [Tinker](https://thinkingmachines.ai/tinker/) platform (Thinking Machines Lab) using LoRA adapters on `meta-llama/Llama-3.1-8B-Instruct`. Each model was evaluated against 10 sampled generations per patient.
+
+---
+
+## Attack Phases
+
+Three PHI extraction attacks are implemented, each targeting a distinct category of patient-specific protected health information:
+
+### Phase II: Aortic Imaging Attack
+The model is prompted with a patient's partial clinical profile and asked to reproduce their aortic measurements — specifically, their first recorded diameter and their diameter at intervention. Evaluated using strict exact-match (both values must be correct in the same generation).
+
+### Phase II: Genetic Variant Attack
+The model is asked to reproduce a patient's pathogenic gene variant or VUS (variant of uncertain significance) from their clinical profile. Evaluated using regex-based exact gene name matching with contextual guards to exclude generic list mentions.
+
+### Phase III: ICD-10 Comorbidity Attack
+The model is asked to reproduce a patient's full ICD-10 diagnostic code array. Two complementary metrics are used: (1) strict exact array match, and (2) partial recall — the fraction of ground-truth codes appearing in at least one of 10 sampled generations, computed via regex extraction.
+
+> [!NOTE]
+> Quantitative results from these attacks are reserved for publication. See the accompanying paper for findings.
+
+---
+
 ## Using Your Own Dataset
-If you are replicating this pipeline, you must supply your own clinical CSV. 
+
 1. Place your dataset in `data/raw/`.
-2. Duplicate the template file: `cp src/config.py.template src/config.py`.
-3. Update `src/config.py` to point `CSV_PATH` to your specific file.
+2. Duplicate the template: `cp src/utils/config.py.template src/utils/config.py`
+3. Update `src/utils/config.py` to point `CSV_PATH` to your file.
 
 ### Required CSV Schema
-To successfully run `generate_cards.py` and the rarity scoring pipeline, your dataset must contain the following core columns. Note that categorical variables are expected as integer codes (e.g. `1`, `2`) rather than text. 
+
+To successfully run `generate_cards.py` and the rarity scoring pipeline, your dataset must contain the following core columns. Categorical variables are expected as integer codes rather than text.
 
 | **Category** | **Column Name** | **Data Type** | **Description / Codes** |
 | :--- | :--- | :--- | :--- |
 | **Demographics** | `Age_at_presentation` | Numeric | Exact age (e.g. `45.2`) |
 | | `Sex` | String | e.g. `"M"`, `"F"` |
 | | `Family_history_aortic_disease` | Boolean | `1` = Yes, `0` = No |
-| **Genetics** | `Pathogenic Gene` | String | Gene name (e.g. "FBN1", "SMAD3"). Blank if none. |
+| **Genetics** | `Pathogenic Gene` | String | Gene name (e.g. `"FBN1"`, `"SMAD3"`). Blank if none. |
 | | `VUS Gene` | String | Gene name. Blank if none. |
-| **Phenotypes** | `Aneurysm_involvement` | Integer List | `0`: None, `1`: Root, `2`: Ascending, `3`: Arch, `4`: Descending, `5`: Abdominal. (Accepts comma-lists like `1, 2`) |
+| | `ICD10_codes` | String | Comma-separated ICD-10 codes (e.g. `"I71.01, I35.0, E78.5"`). Used for Phase III attack. |
+| **Phenotypes** | `Aneurysm_involvement` | Integer List | `0`: None, `1`: Root, `2`: Ascending, `3`: Arch, `4`: Descending, `5`: Abdominal. Accepts comma-lists like `1, 2`. |
 | | `Acute_aortic_syndrome` | Integer | `0`: None, `1`: Type A dissection, `2`: Type B, `3`: Intramural hematoma, `4`: PAU. |
 | | `Complicating_factor` | Integer | `0`: None, `1`: Rupture, `2`: Cardiac tamponade, `3`: Malperfusion, `4`: Other. |
 | | `Bicuspid_aortic_valve` | Boolean | `1` = Yes, `0` = No |
-| **Measurements**| `first_reported_diameter` | Numeric | Size in mm (e.g. `45` or `45.5`) |
+| **Measurements** | `first_reported_diameter` | Numeric | Size in mm (e.g. `45` or `45.5`) |
 | | `intervention_diameter` | Numeric | Size in mm (e.g. `50`) |
-| **Surgery** | `surg_N_age` (Up to $N=3$) | Integer | Patient's age at time of surgery (e.g. `55`) |
-| | `surg_N_type` | Free-text | Clinician description (e.g. "Bentall procedure with 29mm graft") |
+| **Surgery** | `surg_N_age` (Up to N=3) | Integer | Patient's age at time of surgery |
+| | `surg_N_type` | Free-text | Clinician description (e.g. `"Bentall procedure with 29mm graft"`) |
 | | **Procedure Flags** | Boolean | `surg_N_aortic_valve_repair`, `surg_N_aortic_valve_replacement`, `surg_N_aortic_root_repair`, `surg_N_aortic_root_replacement`, `surg_N_ascending_aorta_replacement`, `surg_N_hemiarch_replacement`, `surg_N_total_arch_replacement`, `surg_N_stage_I_elephant_trunk`, `surg_N_TEVAR`, `surg_N_CABG`, `surg_N_descending_replacement` |
 | **Outcomes** | `underwent_reoperation` | Boolean | `1` = Yes, `0` = No |
-| | `Reoperation_indication` | Free-text | Field describing why reoperation occurred. |
+| | `Reoperation_indication` | Free-text | Why reoperation occurred. |
 | | `mortality` | Boolean | `1` = Dead, `0` = Alive |
 | | `Causes_of_death` | Integer | `1` = Aortic/Cardiac, `2` = Other |
 
-### Study Architecture
-The study evaluates three model configurations against a standardized holdout evaluation set:
+---
 
-*   **M0 (Baseline):** A prompt-only baseline (no fine-tuning).
-*   **M1 (Full FT):** SFT tuned on the fully-identifiable original patient cards.
-*   **M2 (Coarsened FT):** SFT tuned on privacy-mitigated, coarsened patient cards (e.g., specific age replaced with age brackets, exact sizes replaced with "<50mm", exact dates removed).
+## Study Architecture
 
+The study evaluates three model configurations against a standardized holdout evaluation set. Each model is prompted with a partial patient card (demographics, phenotype, surgical history) and asked to reproduce a specific PHI target.
+
+*   **M0 (Baseline):** A prompt-only baseline — `meta-llama/Llama-3.1-8B-Instruct` with no fine-tuning. Establishes what is predictable from clinical context alone.
+*   **M1 (Full SFT):** LoRA fine-tuned on the fully-identifiable original patient cards (12 epochs). Measures maximum memorization under standard fine-tuning.
+*   **M2 (Coarsened SFT):** LoRA fine-tuned on privacy-mitigated cards (12 epochs). ICD-10 codes coarsened to 3-character prefixes; aortic sizes binned into ranges. Measures how much memorization coarsening prevents.
 
 ### Evaluation Metrics
-1.  **Membership Inference (AUC):** Can a classifier determine if a patient was in the `train` split based on the nearest-neighbor similarity of the LLM's generated output?
-2.  **Patient Collapse (Dominance/Entropy):** When prompted with an incomplete card (e.g., genetics and demographics only) 10 times, does the LLM deterministically hallucinate the exact same unique surgical trajectory every time?
-3.  **Rare-Combo Reproduction Rate:** Does the LLM output a set of clinical assertions that uniquely matches exactly $k=1$ patient in the training set?
+
+1. **Exact Match Success Rate:** The fraction of patients for whom the model reproduced the target PHI exactly (used for size attack — both diameters — and gene attack).
+2. **Partial Recall (ICD-10):** Per-code recall — what fraction of a patient's GT ICD-10 code array appeared in at least one of 10 model generations. Computed using regex extraction.
+3. **Per-Code Recall Lift:** The difference in recall rate between M1 and M0 for each specific ICD-10 code or gene, isolating memorization from clinical prior knowledge.
+4. **Train vs. Test Split Analysis:** Success rates compared across train/test partitions to distinguish generalization from overfitting.
 
 ---
 
 ## Supervised Fine-Tuning & Memorization
 
-### Supervised Fine-Tuning (SFT)
-Large Language Models are pre-trained on vast corpuses of internet text to understand language organically. **Supervised Fine-Tuning (SFT)** is the subsequent process of updating the model's inner weights using highly specific, structured examples (in our case, `Prompt -> Ground Truth Patient History`). By minimizing the loss against exact clinical records, the model adopts the persona, format, and clinical reasoning present in our proprietary dataset.
+### What is Supervised Fine-Tuning (SFT)?
 
-However, SFT inherently risks catastrophic privacy failures. If a model overfits to the training data, it may memorize the exact arbitrary strings of a specific patient's record, allowing malicious actors to extract protected health information (PHI) simply by prompting the model with a few known demographic details.
+Large Language Models are pre-trained on vast corpora of internet text to understand language organically. **Supervised Fine-Tuning (SFT)** is the subsequent process of updating model weights using structured (prompt → response) examples — in our case, `Partial Patient Card → Ground Truth PHI`. By minimizing cross-entropy loss against exact clinical records, the model learns the format, clinical vocabulary, and — critically — the patient-specific facts present in the training data.
+
+This project uses **LoRA (Low-Rank Adaptation)**, a parameter-efficient SFT method that updates only a small set of adapter weights (< 1% of total parameters) while leaving base model weights frozen. Despite this minimal footprint, our results demonstrate that even LoRA adaptation on small clinical cohorts produces measurable PHI memorization.
 
 ### The Tinker Platform (Thinking Machines Lab)
-To execute the fine-tuning pipelines and massive parallel inference generation required for this project, we utilize **Tinker**, a developer platform built by the [Thinking Machines Lab](https://thinkingmachines.ai/tinker/). 
 
-Tinker provides scalable infrastructure for:
-1.  **LoRA Fine-Tuning:** Efficiently fine-tuning `meta-llama/Llama-3.1-8B-Instruct` using Low-Rank Adaptation via the `tinker-cookbook`.
-2.  **Batch Inference:** Sourcing thousands of parallel predictions across the newly minted model endpoints via the Tinker `SamplingClient`.
+To execute fine-tuning and large-scale parallel inference, we use **[Tinker](https://thinkingmachines.ai/tinker/)**, a developer platform built by Thinking Machines Lab. Tinker provides:
 
-### Experimental Phases (Epoch Scaling)
-Our study dissects memorization across two distinct optimization regimes:
-1.  **Phase I: Baseline Generalization (3 Epochs)**
-    *   Models are trained for 3 epochs (industry standard for optimal generalization).
-    *   **Goal:** Determine if standard clinical SFT inherently leaks privacy, or if the model merely acts as a generalized "expert clinician."
-2.  **Phase II: Deep Memorization (12 Epochs)**
-    *   Models are aggressively overfit for 12 epochs.
-    *   **Goal:** Force the weights to memorize arbitrary, non-generalizable PHI (e.g. exact `MM/DD/YYYY` surgery dates and rare VUS genetic mutations). This phase isolates where and how systemic privacy collapse occurs under stress.
+1. **LoRA Fine-Tuning:** Efficiently fine-tuning `meta-llama/Llama-3.1-8B-Instruct` via the `tinker-cookbook`.
+2. **Batch Inference:** Sourcing thousands of parallel predictions across model endpoints via the Tinker `SamplingClient`.
 
----
+### Why This Matters
 
-## Calculating Patient Rarity Scores
-A critical hypothesis of this study is that LLMs memorize patients *inversely proportional to their clinical rarity*. To avoid arbitrary heuristics (e.g., "rare means $>3$ surgeries"), we compute rarity using a mathematically grounded, multi-axis **Self-Information (Surprisal)** framework.
+A common assumption in clinical AI deployment is that lightweight fine-tuning (LoRA/PEFT) on protected datasets is a low-risk adaptation strategy — that the adapter's small parameter count prevents meaningful memorization. Our results challenge this assumption:
 
-### Self-Information Score: $I(x) = -\log_{10} p(x)$
-We independently compute the empirical probability $p(x)$ of observing a patient's exact profile within our cohort across three axes, yielding additive self-information scores:
-1.  **Genetic Rarity ($I_{gen}$):** Based on the frequency of their specific Pathogenic and VUS genes.
-2.  **Phenotypic Rarity ($I_{phen}$):** Based on their aneurysm involvement, acute aortic syndrome, complicating factors, and bicuspid valve status.
-3.  **Trajectory Rarity ($I_{traj}$):** Based on the number of surgeries, categories of proximal/distal replacement, and reoperation history.
+- M1 (LoRA, 12 epochs, 1,048 patients) reproduced **exact dual aortic measurements** for 5.5% of patients with a **zero baseline**.
+- M1 recalled **atrial fibrillation status** for 68.8% of patients who had it (vs. 0% baseline).
+- M1 recalled **cardiac implant status** (pacemakers, prosthetic valves) for 79.5% of patients.
 
-**Composite Rarity:** $I_{total} = I_{gen} + I_{phen} + I_{traj}$
-
-
-### K-Anonymity Rarity Strata
-Stratification is anchored to established disclosure control literature (k-anonymity):
-*   **Ultra Rare:** High identifiability risk (Full profile $k \le 2$ or Top 5% surprisal).
-*   **Rare:** Elevated rarity ($k \le 5$ or Top 25% surprisal).
-*   **Common:** Lower identifiable risk ($k > 5$ and bottom 75% surprisal).
+If LoRA SFT on 1,048 patients over 12 epochs produces this level of PHI exposure, full fine-tuning or pretraining on larger clinical corpora should be presumed to carry substantially greater risk.
 
 ---
 
-## <img src="https://cdn-icons-png.flaticon.com/512/17404/17404308.png" width="24" height="24"> Repository Structure & Pipeline
+## Repository Structure
 
-The project is organized into `src/` (pipeline logic) and `data/` (raw and generated artifacts).
+```
+.
+├── README.md
+├── data/
+│   ├── raw/                          # Original proprietary CSV (not committed)
+│   ├── cards/                        # Generated patient cards
+│   │   ├── cards_full.jsonl          # M1 training source
+│   │   ├── cards_coarsened.jsonl     # M2 training source
+│   │   ├── cards_partial.jsonl       # Eval prompt source
+│   │   └── cards_exact.jsonl
+│   ├── processed/
+│   │   ├── splits.csv                # Train/test assignments + rarity scores
+│   │   ├── training_datasets/        # Tinker SFT payloads
+│   │   │   ├── tinker_train_M1_full.jsonl
+│   │   │   └── tinker_train_M2_coarsened.jsonl
+│   │   └── eval_prompts/             # Per-attack evaluation prompts
+│   │       ├── eval_prompts_general.jsonl
+│   │       ├── eval_prompts_size_attack.jsonl
+│   │       ├── eval_prompts_gene_attack.jsonl
+│   │       └── eval_prompts_icd10_attack.jsonl
+│   └── results/
+│       ├── predictions/
+│       │   ├── phase2_size_gene/     # M0/M1/M2 size + gene prediction files
+│       │   └── phase3_icd10/         # M0/M1/M2 ICD-10 prediction files
+│       ├── summaries/                # Summary CSV tables (per-attack)
+│       ├── reports/                  # Markdown manual evaluation tables
+│       └── archive_phase2/           # Archived older phase metrics
+│
+└── src/
+    ├── utils/
+    │   ├── config.py.template
+    │   └── config.py                 # Local only — not committed
+    ├── 01_dataset_processing/
+    │   ├── convert_dates_to_ages.py  # Scrubs exact dates → patient ages
+    │   ├── generate_cards.py         # Raw CSV → patient cards
+    │   ├── verify_cards.py           # QA data fidelity check
+    │   └── preview_raw_cards.py      # Manual verification helper
+    ├── 02_rarity_analysis/
+    │   ├── analyze_rarity.py         # Gene/trajectory frequency counts
+    │   ├── compute_rarity_scores.py  # Self-information + k-anonymity
+    │   ├── create_splits_and_prompts.py  # 80/20 stratified splits + prompts
+    │   ├── create_phase2_prompts.py  # Size + gene attack prompts
+    │   └── create_phase3_prompts.py  # ICD-10 attack prompts
+    ├── 03_tinker_tuning/
+    │   ├── prepare_tinker_data.py    # Format splits → Tinker SFT jsonl
+    │   ├── launch_tinker_jobs.py     # Launch M1/M2 fine-tuning jobs
+    │   └── list_tinker_models.py     # List active Tinker deployments
+    └── 04_evaluation/
+        ├── generation/               # Inference scripts (run models)
+        │   ├── generate_predictions.py
+        │   ├── generate_phase2_predictions.py
+        │   └── generate_phase3_predictions.py
+        └── analysis/                 # Evaluation + reporting scripts
+            ├── analyze_significance.py
+            ├── analyze_icd10_partial_match.py
+            ├── compute_metrics.py
+            ├── generate_full_tables.py
+            ├── generate_manual_examples.py
+            ├── generate_gene_size_summary_csv.py
+            └── generate_icd10_summary_csv.py
+```
 
-* **`src/`** <img src="https://raw.githubusercontent.com/devicons/devicon/master/icons/python/python-original.svg" width="16" height="16"> 
-  * **`utils/`**
-      * `config.py.template` — Template for global configuration
-  * **`01_dataset_processing/`**
-      * `convert_dates_to_ages.py` — Privacy: Scrubs exact surgery/DOB dates into patient age
-      * `generate_cards.py` — ETL: Raw CSV -> patient cards (Full, Coarsened, Partial)
-      * `verify_cards.py` — QA: Asserts 100% data fidelity between cards and CSV
-      * `preview_raw_cards.py` — Temporary: Generates raw PHI cards for manual verification
-  * **`02_rarity_analysis/`**
-      * `analyze_rarity.py` — Stats: Outputs initial gene/trajectory frequency counts
-      * `compute_rarity_scores.py` — Stats: Computes I_total surprisal and k-anonymity
-      * `create_splits_and_prompts.py` — Pipeline: 80/20 Stratified train/test splits + eval prompts
-  * **`03_tinker_tuning/`**
-      * `prepare_tinker_data.py` — Pipeline: Formats splits.csv into Tinker SFT jsonl payloads
-      * `launch_tinker_jobs.py` — API execution script to trigger model fine-tuning
-      * `list_tinker_models.py` — Helper script to list active deployed Tinker models
-  * **`04_evaluation/`**
-      * `generate_predictions.py` — Executes generation against models M0, M1, M2 using Tinker APIs
-      * `compute_metrics.py` — Computes memorization attack success and empirical evaluation rates
+---
 
-* **`data/`** 
-  * **`raw/`** <img src="https://cdn-icons-png.flaticon.com/256/8242/8242984.png" width="16" height="16">
-    * `YOUR_DATABASE_HERE.csv`
-  * **`cards/`** <img src="https://cdn.jsdelivr.net/gh/PKief/vscode-material-icon-theme@main/icons/json.svg" width="16" height="16">
-    * `cards_full.jsonl` — M1 Training source
-    * `cards_coarsened.jsonl` — M2 Training source
-    * `cards_partial.jsonl` — Evaluation Prompt source
-  * **`processed/`** *(mix of CSVs & JSONLs)*
-    * `splits.csv` — Train/Test assignments + all continuous rarity metrics
-    * `eval_prompts.jsonl` — Inference attack prompts mapping to Patient IDs
-    * `tinker_train_M1_full.jsonl` — Payload for Tinker SFT (M1)
-    * `tinker_train_M2_coarsened.jsonl` — Payload for Tinker SFT (M2)
+## Getting Started
 
-## <img src="https://cdn.jsdelivr.net/gh/PKief/vscode-material-icon-theme@main/icons/console.svg" width="24" height="24"> Getting Started
 > [!IMPORTANT]
-> **API Key Setup:** Set your `TINKER_API_KEY` either as a system environment variable, or modify the generated `src/utils/config.py` file to include it before proceeding. Do NOT commit the API key.
+> **Before running anything**, set up your local configuration file:
+> ```bash
+> cp src/utils/config.py.template src/utils/config.py
+> ```
+> Then open `src/utils/config.py` and set:
+> - `CSV_PATH` — path to your raw patient CSV in `data/raw/`
+> - `TINKER_API_KEY` — your Tinker API key (or set as a system environment variable)
+>
+> **Do NOT commit `config.py`** — it is gitignored by default.
 
-1. <img src="https://cdn.jsdelivr.net/gh/PKief/vscode-material-icon-theme@main/icons/settings.svg" width="16" height="16"> **Configure:** Duplicate `src/utils/config.py.template` into `src/utils/config.py` and configure your dataset path and environment keys.
+Run scripts in this order:
 
-*Run the following Python <img src="https://raw.githubusercontent.com/devicons/devicon/master/icons/python/python-original.svg" width="16" height="16"> scripts in sequence:*
+```bash
+# 1. Privacy sanitization
+python src/01_dataset_processing/convert_dates_to_ages.py
 
-2. **Sanitize Data:** Run `python src/01_dataset_processing/convert_dates_to_ages.py` to convert all surgery dates into patient ages. This is a further privacy measure to ensure no exact DOB/surgery dates are exposed.
-3. **Extract:** Run `python src/01_dataset_processing/generate_cards.py` to build the foundational datasets.
-4. **Verify:** Run `python src/01_dataset_processing/verify_cards.py` to ensure zero data pipeline leakage.
-5. **Score:** Run `python src/02_rarity_analysis/compute_rarity_scores.py` to generate the theoretical bounds.
-6. **Stratify:** Run `python src/02_rarity_analysis/create_splits_and_prompts.py` to stratify the cohort based on surprisal scores.
-7. **Payloads:** Run `python src/03_tinker_tuning/prepare_tinker_data.py` to prepare the JSONL files for the SFT cluster.
-8. **Fine-Tune:** Run `python src/03_tinker_tuning/launch_tinker_jobs.py` to begin fine-tuning M1 and M2.
+# 2. Build patient cards
+python src/01_dataset_processing/generate_cards.py
+python src/01_dataset_processing/verify_cards.py
+
+# 3. Compute rarity + splits
+python src/02_rarity_analysis/compute_rarity_scores.py
+python src/02_rarity_analysis/create_splits_and_prompts.py
+
+# 4. Build attack-specific eval prompts
+python src/02_rarity_analysis/create_phase2_prompts.py   # size + gene
+python src/02_rarity_analysis/create_phase3_prompts.py   # ICD-10
+
+# 5. Fine-tune models
+python src/03_tinker_tuning/prepare_tinker_data.py
+python src/03_tinker_tuning/launch_tinker_jobs.py
+
+# 6. Generate predictions
+python src/04_evaluation/generation/generate_phase2_predictions.py
+python src/04_evaluation/generation/generate_phase3_predictions.py
+
+# 7. Analyze results
+python src/04_evaluation/analysis/analyze_significance.py
+python src/04_evaluation/analysis/analyze_icd10_partial_match.py
+python src/04_evaluation/analysis/generate_gene_size_summary_csv.py
+python src/04_evaluation/analysis/generate_icd10_summary_csv.py
+python src/04_evaluation/analysis/generate_manual_examples.py
+```
+
+---
+
+## Patient Rarity Framework
+
+Memorization risk is hypothesized to scale inversely with patient clinical rarity. Rarity is computed via **Self-Information (Surprisal):** $I(x) = -\log_{10} p(x)$
+
+Three axes are computed independently and summed:
+- **$I_{gen}$** — Genetic rarity (pathogenic + VUS gene frequency)
+- **$I_{phen}$** — Phenotypic rarity (aneurysm type, BAV, acute syndrome)
+- **$I_{traj}$** — Trajectory rarity (number + type of surgeries, reoperation)
+
+**K-Anonymity strata:**
+- **Ultra Rare:** $k \le 2$ or top 5% surprisal
+- **Rare:** $k \le 5$ or top 25% surprisal
+- **Common:** $k > 5$ and bottom 75% surprisal

@@ -1,18 +1,32 @@
-# Ignore all data directories to prevent PHI/PII leakage
-data/*
-!data/.gitkeep
+# ── DATA: Exclude everything to prevent PHI/HIPAA leakage ────────────────────
+# Exclude all data/ contents recursively, but preserve folder structure
+# via .gitkeep files so collaborators can see the expected layout.
 
-# Ignore python caches, virtual environments, and local configs
+data/**
+!data/**/.gitkeep
+!data/Reminder.md
+
+# ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyo
+
+# ── Virtual environments ──────────────────────────────────────────────────────
 venv/
 env/
+.venv/
 .env
 
-# Ignore config keys but DO NOT ignore the template
+# ── Local config (API keys, paths) ───────────────────────────────────────────
+# DO NOT commit config.py — use config.py.template instead
 src/utils/config.py
 !src/utils/config.py.template
 
-# Ignore OS files
+# ── OS & editor files ─────────────────────────────────────────────────────────
 .DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
